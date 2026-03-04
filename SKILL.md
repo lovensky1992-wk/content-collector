@@ -33,16 +33,39 @@ collections/
 
 ## 收藏工作流
 
+### Supadata API（优先方案）
+对于大部分 URL，优先使用 Supadata API 解析：
+- 脚本：`SUPADATA_API_KEY=<key> python3 scripts/supadata_fetch.py <command> <url>`
+- 环境变量：`SUPADATA_API_KEY` 存放在 TOOLS.md
+
+| 内容类型 | 命令 | 说明 |
+|---------|------|------|
+| 网页/博客 | `web <url>` | 返回 Markdown 正文，1 credit |
+| 视频转录 | `transcript <url> --text [--lang zh]` | YouTube/TikTok/X/Instagram/Facebook，1-2 credits |
+| 社交媒体元数据 | `metadata <url>` | 标题、作者、互动数据，1 credit |
+
+Supadata 不可用时的降级方案：
+- 网页 → `web_fetch`
+- B站 → 本地 bilibili 脚本（见下方）
+- 需登录/内网 → Chrome Relay
+
 ### URL 内容（文章/博客/网页）
-1. `web_fetch` 抓取正文
-2. 提取标题、作者、发布日期、正文摘要、关键词
-3. 生成 `collections/articles/YYYY-MM-DD-slug.md`
+1. **优先** `supadata_fetch.py web <url>` 抓取正文
+2. **降级** `web_fetch` 抓取正文
+3. 提取标题、作者、发布日期、正文摘要、关键词
+4. 生成 `collections/articles/YYYY-MM-DD-slug.md`
+
+### 视频内容（YouTube/TikTok/X/Instagram/Facebook）
+1. **元数据**: `supadata_fetch.py metadata <url>`
+2. **转录**: `supadata_fetch.py transcript <url> --text --lang zh`
+3. **内容提取**：基于转录文本提取核心观点、金句、要点
+4. 生成 `collections/videos/YYYY-MM-DD-slug.md`
 
 ### 纯文本/截图
 1. 截图用 `image` 工具提取文字
 2. 整理成结构化格式，来源可选补充
 
-### B站视频（完整自动化流程）
+### B站视频（本地流程，Supadata 不支持 B站）
 1. **元数据**：`python3 scripts/bilibili_extract.py <bvid_or_url>` → 标题、作者、时长、标签、数据指标
 2. **评论区**：
    - 无登录（API）：3条热门
@@ -55,10 +78,6 @@ collections/
    - 注意：ASR 有识别错误，专有名词需人工校验
 4. **内容提取**：基于转录文本提取核心观点、金句、要点
 5. 生成 `collections/videos/YYYY-MM-DD-slug.md`
-
-### 其他视频平台（YouTube/抖音/视频号）
-- 暂不支持自动处理
-- 用户可提供转录文本或关键信息，手动整理
 
 ## 存储格式
 
