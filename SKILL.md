@@ -79,6 +79,29 @@ Supadata 不可用时的降级方案：
 4. **内容提取**：基于转录文本提取核心观点、金句、要点
 5. 生成 `collections/videos/YYYY-MM-DD-slug.md`
 
+## 关联项目（自动匹配）
+
+每次收藏内容后，自动将内容与当前活跃项目关联：
+
+1. 读取 `~/.openclaw/workspace/memory/topics/projects.md` 获取活跃项目列表
+2. 将收藏内容的标题、摘要、标签与每个项目的关键词匹配
+3. 匹配到的项目写入收藏文件的 YAML frontmatter：
+   ```yaml
+   related_projects: ["wemp-ops", "xiaohongshu-ops"]
+   project_notes: "这个案例可以用于公众号选题：AI调度人力的真实案例"
+   ```
+4. 同时在 `index.md` 中标注关联项目，方便按项目筛选素材
+
+### 项目关键词（自动从 projects.md 提取）
+- **wemp-ops**：公众号、写作、文章、排版、内容运营
+- **xiaohongshu-ops**：小红书、笔记、种草、配图、短内容
+- **content-collector**：收藏、知识管理、素材库
+
+### 使用场景
+- 写公众号文章前：`搜索关联 wemp-ops 的收藏` → 快速找到素材
+- 写小红书前：`搜索关联 xiaohongshu-ops 的收藏` → 找到适合拆解的内容
+- 选题会议：按项目汇总最近收藏 → 发现选题方向
+
 ## 存储格式
 
 文件命名：`YYYY-MM-DD-slug.md`
