@@ -22,8 +22,11 @@ HEADERS = {
 
 COOKIE = ""
 
-def fetch_json(url):
-    req = urllib.request.Request(url, headers={**HEADERS, "Cookie": COOKIE})
+def fetch_json(url, extra_headers=None):
+    headers = {**HEADERS, "Cookie": COOKIE}
+    if extra_headers:
+        headers.update(extra_headers)
+    req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req, timeout=15) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
@@ -69,15 +72,19 @@ def get_video_tags(bvid):
         pass
     return []
 
-def get_comments(aid, max_comments=30):
-    """Fetch comments. With cookie, can get many more results."""
+def get_comments(aid, max_comments=30, cookie_sessdata=None):
+    """Fetch comments. With cookie_sessdata, can paginate up to 20 pages (400 comments)."""
     comments = []
     seen = set()
 
-    for pn in range(1, 6):  # up to 5 pages
+    max_pages = 20 if cookie_sessdata else 5
+    extra_headers = {"Cookie": f"SESSDATA={cookie_sessdata}"} if cookie_sessdata else None
+
+    for pn in range(1, max_pages + 1):
         try:
             data = fetch_json(
-                f"https://api.bilibili.com/x/v2/reply?type=1&oid={aid}&sort=2&pn={pn}&ps=20"
+                f"https://api.bilibili.com/x/v2/reply?type=1&oid={aid}&sort=2&pn={pn}&ps=20",
+                extra_headers=extra_headers,
             )
             if data["code"] != 0:
                 break
@@ -154,6 +161,11 @@ def get_subtitle(bvid, cid):
         pass
     return []
 
+def _extract_sessdata(text):
+    """Extract SESSDATA value from cookie text (e.g. 'SESSDATA=abc123' or full cookie string)."""
+    m = re.search(r"SESSDATA=([^\s;]+)", text)
+    return m.group(1) if m else None
+
 def main():
     if len(sys.argv) < 2:
         print("Usage: python3 bilibili_extract.py <bvid_or_url> [--comments N] [--cookie-file PATH]", file=sys.stderr)
@@ -163,6 +175,7 @@ def main():
 
     bvid = extract_bvid(sys.argv[1])
     max_comments = 30
+    cookie_sessdata = None
 
     if "--comments" in sys.argv:
         idx = sys.argv.index("--comments")
@@ -173,15 +186,20 @@ def main():
         idx = sys.argv.index("--cookie-file")
         if idx + 1 < len(sys.argv):
             with open(sys.argv[idx + 1], "r") as f:
-                COOKIE = f.read().strip()
+                cookie_text = f.read().strip()
+            COOKIE = cookie_text
+            cookie_sessdata = _extract_sessdata(cookie_text)
 
     # Also check env
     if not COOKIE:
-        COOKIE = os.environ.get("BILIBILI_COOKIE", "")
+        env_cookie = os.environ.get("BILIBILI_COOKIE", "")
+        if env_cookie:
+            COOKIE = env_cookie
+            cookie_sessdata = _extract_sessdata(env_cookie)
 
     info = get_video_info(bvid)
     info["tags_from_page"] = get_video_tags(bvid)
-    info["comments"] = get_comments(info["aid"], max_comments)
+    info["comments"] = get_comments(info["aid"], max_comments, cookie_sessdata=cookie_sessdata)
     info["subtitle"] = get_subtitle(bvid, info["cid"])
     info["has_subtitle"] = len(info["subtitle"]) > 0
     info["comment_count_fetched"] = len(info["comments"])
