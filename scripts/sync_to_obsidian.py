@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""将 collections/ 中的收藏同步到 KaiVault Obsidian vault，做格式适配"""
+"""将 collections/ 中的收藏同步到 Obsidian vault，做格式适配"""
 
 import os
 import re
 import shutil
 import yaml
 
-COLLECTIONS_DIR = os.path.expanduser("~/.openclaw/workspace/collections")
-KAIVAULT_DIR = os.path.expanduser("~/KaiVault/6-资源/收藏")
+# Default paths - customize for your setup
+COLLECTIONS_DIR = os.path.expanduser(os.getenv("COLLECTIONS_DIR", "~/.openclaw/workspace/collections"))
+OBSIDIAN_DIR = os.path.expanduser(os.getenv("OBSIDIAN_DIR", "~/ObsidianVault/收藏"))
 
 # category -> obsidian subdirectory
 CATEGORY_MAP = {
@@ -82,7 +83,7 @@ def sync_file(src_path, category):
     
     # Determine target directory
     subdir = CATEGORY_MAP.get(category, "文章")
-    target_dir = os.path.join(KAIVAULT_DIR, subdir)
+    target_dir = os.path.join(OBSIDIAN_DIR, subdir)
     os.makedirs(target_dir, exist_ok=True)
     
     target_path = os.path.join(target_dir, f"{safe_title}.md")
@@ -125,7 +126,7 @@ def main():
             except Exception as e:
                 print(f"  ❌ {fname}: {e}")
     
-    print(f"\n🎉 完成！共同步 {synced} 篇到 KaiVault")
+    print(f"\n🎉 完成！共同步 {synced} 篇到 Obsidian")
 
 if __name__ == "__main__":
     main()

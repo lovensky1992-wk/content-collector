@@ -26,7 +26,7 @@ if [ -f "$AUDIO_FILE" ]; then
     echo "Audio already exists: $AUDIO_FILE" >&2
 else
     echo "Downloading audio for $BVID..." >&2
-    yt-dlp --cookies-from-browser chrome:~/.openclaw/browser/openclaw/user-data \
+    yt-dlp --cookies-from-browser chrome \
         -x --audio-format mp3 --audio-quality 5 \
         -o "$OUTDIR/${BVID}.%(ext)s" \
         --no-playlist \

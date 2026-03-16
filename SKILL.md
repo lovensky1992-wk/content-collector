@@ -1,5 +1,6 @@
 ---
 name: content-collector
+version: 1.0.0
 description: >
   个人内容收藏与知识管理系统。收藏、整理、检索、二创。
   Use when: (1) 用户分享链接/文字/截图并要求保存或收藏,
@@ -22,7 +23,7 @@ description: >
 ## 数据位置
 
 ### 主存储（AI 检索用）
-`~/.openclaw/workspace/collections/`
+`<WORKSPACE>/collections/`
 
 ```
 collections/
@@ -35,8 +36,8 @@ collections/
 └── tags.md         # 标签索引（自动维护）
 ```
 
-### Obsidian 同步（人工浏览用）
-`~/KaiVault/6-资源/收藏/`
+### Obsidian 同步（人工浏览用，可选）
+`<YOUR_OBSIDIAN_VAULT>/收藏/`
 
 ```
 收藏/
@@ -55,7 +56,7 @@ collections/
 
 **Obsidian 写入模板**（伪代码）：
 ```
-target_dir = ~/KaiVault/6-资源/收藏/{中文目录}/
+target_dir = <YOUR_OBSIDIAN_VAULT>/收藏/{中文目录}/
 filename = sanitize(title).md   # 去掉 <>:"/\|?* 等非法字符，截断80字符
 content = 原始 frontmatter（加 aliases） + "\n\n" + "#tag1 #tag2 ..." + "\n\n" + body
 ```
@@ -84,14 +85,14 @@ Supadata 不可用时的降级方案：
 3. 提取标题、作者、发布日期、正文摘要、关键词
 4. **提取有价值的插图**（默认执行，见下方「插图保存规范」）
 5. 生成 `collections/articles/YYYY-MM-DD-slug.md`（含插图引用）
-6. **同步到 Obsidian** → `~/KaiVault/6-资源/收藏/文章/{标题}.md`（含插图复制）
+6. **同步到 Obsidian** → `<YOUR_OBSIDIAN_VAULT>/收藏/文章/{标题}.md`（含插图复制）
 
 ### 视频内容（YouTube/TikTok/X/Instagram/Facebook）
 1. **元数据**: `supadata_fetch.py metadata <url>`
 2. **转录**: `supadata_fetch.py transcript <url> --text --lang zh`
 3. **内容提取**：基于转录文本提取核心观点、金句、要点
 4. 生成 `collections/videos/YYYY-MM-DD-slug.md`
-5. **同步到 Obsidian** → `~/KaiVault/6-资源/收藏/视频/{标题}.md`
+5. **同步到 Obsidian** → `<YOUR_OBSIDIAN_VAULT>/收藏/视频/{标题}.md`
 
 ### 纯文本/截图
 1. 截图用 `image` 工具提取文字
@@ -114,7 +115,7 @@ Supadata 不可用时的降级方案：
      - 全部失败 → 仅保存元数据+评论，在收藏文件中标注"转录未获取，待补充"，不阻塞收藏流程
 4. **内容提取**：基于转录文本提取核心观点、金句、要点
 5. 生成 `collections/videos/YYYY-MM-DD-slug.md`
-6. **同步到 Obsidian** → `~/KaiVault/6-资源/收藏/视频/{标题}.md`
+6. **同步到 Obsidian** → `<YOUR_OBSIDIAN_VAULT>/收藏/视频/{标题}.md`
 
 ## 插图保存规范
 
@@ -136,7 +137,7 @@ Supadata 不可用时的降级方案：
    - `![alt](images/{slug}/filename.png)`
    - 斜体说明文字（来自 caption 或自行总结）
 5. **同步到 Obsidian**：
-   - 复制图片到 `~/KaiVault/6-资源/收藏/{中文目录}/images/{slug}/`
+   - 复制图片到 `<YOUR_OBSIDIAN_VAULT>/收藏/{中文目录}/images/{slug}/`
    - Obsidian 版本使用相同的相对路径引用
 
 ### 命名规范
@@ -151,7 +152,7 @@ Supadata 不可用时的降级方案：
 
 每次收藏内容后，自动将内容与当前活跃项目关联：
 
-1. 读取 `~/.openclaw/workspace/memory/topics/projects.md` 获取活跃项目列表
+1. 读取 `<WORKSPACE>/memory/topics/projects.md` 获取活跃项目列表
 2. 将收藏内容的标题、摘要、标签与每个项目的关键词匹配
 3. 匹配到的项目写入收藏文件的 YAML frontmatter：
    ```yaml
@@ -196,12 +197,68 @@ stats: { views: 0, likes: 0, comments: 0 }
 
 ### 内容结构
 
+- **内容概览**（条件触发，见下方规则）— Mermaid 图，一图看懂全文
 - **核心观点** — 3-7个要点
 - **要点摘录** — 原文金句（blockquote）
 - **热门评论精选**（视频类）— 含点赞数
 - **评论区观点摘要**（视频类）— 总结争议点
 - **我的笔记** — 用户个人批注，后续补充
 - **原文摘要** — 200-500字概要
+
+### 内容概览图生成规则
+
+**触发条件**：正文 > 1000 字的 articles / wechat / videos（短推文、零散想法不画）。
+
+**输出格式**：Mermaid 代码块，直接嵌入收藏文件的 `## 内容概览` 章节。Obsidian 原生渲染，不需要额外插件。
+
+**图表类型自动选择**（按文章内容匹配）：
+
+| 文章特征 | 图表类型 | Mermaid 语法 | 示例 |
+|---------|---------|-------------|------|
+| 方法论/框架/模型（分层、组件） | 思维导图 | `mindmap` | "AI PM 的 3 个核心能力" |
+| 流程/步骤/演进（先后顺序） | 流程图 | `graph TB` | "AI 编程三次进化" |
+| 对比/选择（A vs B） | 对比图 | `graph TB` + 并行 subgraph | "传统 PM vs AI PM" |
+| 多实体互动/依赖关系 | 关系图 | `graph LR` | "Agent 各模块数据流" |
+| 时间线/里程碑 | 时间线 | `graph LR` 线性 | "2024 AI 大事记" |
+| 混合/不确定 | 思维导图 | `mindmap`（万能兜底） | — |
+
+**生成要求**：
+1. **节点文字用文章原始术语**，不用"概念1"、"模块A"等占位符
+2. **层级不超过 3 层**——图是辅助理解，不是完整复述
+3. **节点数量 5-15 个**——太少没信息量，太多一眼看不完
+4. **遵守 Mermaid 语法规范**——详见 `references/mermaid-syntax-rules.md`，特别注意：
+   - `1. ` 触发列表解析错误 → 用 `①` 或 `(1)` 或去掉空格
+   - subgraph 带空格 → 用 `subgraph id["显示名"]` 格式
+   - 节点引用用 ID 不用显示文本
+   - 不要在节点文本中使用 Emoji
+5. **配色使用语义色**：
+   - 核心概念：`fill:#d3f9d8,stroke:#2f9e44`（绿）
+   - 问题/挑战：`fill:#ffe3e3,stroke:#c92a2a`（红）
+   - 方法/工具：`fill:#e5dbff,stroke:#5f3dc4`（紫）
+   - 输出/结果：`fill:#c5f6fa,stroke:#0c8599`（青）
+
+**嵌入格式示例**：
+```markdown
+## 内容概览
+
+\`\`\`mermaid
+mindmap
+  root((AI PM 核心能力))
+    问题定义
+      从模糊需求到精确问题
+      判断什么值得做
+    上下文质量
+      Context Engineering
+      给 Agent 正确的信息
+    判断力
+      评估 Agent 产出
+      知道何时人工介入
+\`\`\`
+```
+
+**不做什么**：
+- 不生成独立图片文件——Mermaid 文本直接嵌入 Markdown
+- 不画太复杂的图——收藏文件的图是"速览"，不是完整笔记
 
 ## Obsidian 同步规范
 
@@ -213,7 +270,7 @@ stats: { views: 0, likes: 0, comments: 0 }
    - 添加 `aliases: [title]`
    - 正文第一行加 `#tag1 #tag2 ...`（标签中的空格替换为 `_`）
 3. 文件名 = `sanitize(title).md`（去掉 `<>:"/\|?*`，截断 80 字符）
-4. 写入到 `~/KaiVault/6-资源/收藏/{中文目录}/`
+4. 写入到 `<YOUR_OBSIDIAN_VAULT>/收藏/{中文目录}/`
 
 目录映射：
 | collections 目录 | Obsidian 目录 |
