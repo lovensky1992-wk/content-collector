@@ -1,6 +1,6 @@
 ---
 name: content-collector
-version: 1.0.0
+version: 1.1.0
 description: >
   个人内容收藏与知识管理系统。收藏、整理、检索、二创。
   Use when: (1) 用户分享链接/文字/截图并要求保存或收藏,
@@ -14,6 +14,8 @@ description: >
   或基于已收藏内容进行二次创作，都应使用此技能。
   已支持来源：博客、X/Twitter、网页、B站视频。
   内容类型：文字、长视频（B站可自动转录）、短视频。
+  NOT for: 纯个人笔记/备忘录（直接写文件）、长文写作（用 internal-comms/docx）、
+  公众号发布（用 wemp-ops）、小红书发布（用 xiaohongshu-ops）。
 ---
 
 # Content Collector — 个人内容收藏系统
@@ -83,10 +85,12 @@ Supadata 不可用时的降级方案：
 1. **优先** `supadata_fetch.py web <url>` 抓取正文
 2. **降级** `web_fetch` 抓取正文
 3. 提取标题、作者、发布日期、正文摘要、关键词
-4. **提取有价值的插图**（默认执行，见下方「插图保存规范」）
-5. 生成 `collections/articles/YYYY-MM-DD-slug.md`（含插图引用）
-6. **HTML 快照保存**（仅重要文章）：对 P0/P1 级别的文章，额外保存一份原始 HTML 到 `collections/articles/YYYY-MM-DD-slug.html`，防止源页面删除后内容丢失。普通收藏不保存快照（避免磁盘膨胀）
-7. **同步到 Obsidian** → `<YOUR_OBSIDIAN_VAULT>/收藏/文章/{标题}.md`（含插图复制）
+4. **Schema.org 结构化数据提取**（见下方「Schema.org 提取规范」）：尝试提取页面 JSON-LD，按类型补充 frontmatter 字段。获取不到静默跳过
+5. **URL 路由增强**（见下方「URL 路由表」）：匹配到特定域名时，执行额外提取步骤
+6. **提取有价值的插图**（默认执行，见下方「插图保存规范」）
+7. 生成 `collections/articles/YYYY-MM-DD-slug.md`（含插图引用）
+8. **HTML 快照保存**（仅重要文章）：对 P0/P1 级别的文章，额外保存一份原始 HTML 到 `collections/articles/YYYY-MM-DD-slug.html`，防止源页面删除后内容丢失。普通收藏不保存快照（避免磁盘膨胀）
+9. **同步到 Obsidian** → `<YOUR_OBSIDIAN_VAULT>/收藏/文章/{标题}.md`（含插图复制）
 
 ### 视频内容（YouTube/TikTok/X/Instagram/Facebook）
 1. **元数据**: `supadata_fetch.py metadata <url>`
@@ -117,6 +121,81 @@ Supadata 不可用时的降级方案：
 4. **内容提取**：基于转录文本提取核心观点、金句、要点
 5. 生成 `collections/videos/YYYY-MM-DD-slug.md`
 6. **同步到 Obsidian** → `<YOUR_OBSIDIAN_VAULT>/收藏/视频/{标题}.md`
+
+## Schema.org 提取规范
+
+**目标**：自动从网页结构化数据中获取更准确的元数据，减少人工补充。
+
+### 提取方法
+1. 如果已用 `browser` 打开页面，`evaluate` 执行：
+   ```javascript
+   JSON.parse(document.querySelector('script[type="application/ld+json"]')?.textContent || 'null')
+   ```
+2. 如果只用了 `web_fetch`，用正则从 HTML 中提取 `<script type="application/ld+json">` 内容
+3. 页面可能有多个 JSON-LD 块，取 `@type` 最相关的一个（优先 Article > NewsArticle > BlogPosting > WebPage）
+
+### 字段映射
+
+| Schema.org 字段 | → frontmatter 字段 | 覆盖规则 |
+|---|---|---|
+| `headline` / `name` | `title` | 仅当现有 title 为空或明显是 URL slug 时覆盖 |
+| `author.name` / `author[0].name` | `author` | 仅当现有 author 为空时填充 |
+| `datePublished` | `date_published` | 优先使用（比 meta tag 更准确） |
+| `description` | `summary` | 仅当现有 summary 为空时填充 |
+| `aggregateRating.ratingValue` | `schema_data.rating` | 直接写入 |
+| `aggregateRating.reviewCount` | `schema_data.reviewCount` | 直接写入 |
+| `@type` | `schema_type` | 直接写入 |
+| 其他有价值字段 | `schema_data.*` | 按需写入，总共不超过 10 个 key-value |
+
+### 注意
+- **静默降级**：提取失败（无 JSON-LD、解析报错、字段为空）→ 跳过，不阻塞收藏流程
+- **不覆盖已有**：已有明确值的字段不被 Schema.org 数据覆盖（Schema.org 是补充，不是权威源）
+- **schema_data 精简**：只保留有信息量的字段（rating/price/duration/keywords 等），忽略 @context、publisher logo URL 等噪音
+
+## URL 路由表
+
+按域名/URL 模式匹配差异化提取策略。**匹配到时执行额外步骤，未匹配走默认流程。**
+
+| URL 模式 | 自动 category | 额外提取 | 特殊处理 |
+|----------|--------------|---------|---------|
+| `arxiv.org/abs/*` | `articles` | abstract、authors 列表、PDF 链接、subjects/categories | 标签自动加 `论文`；从 abs 页提取，不下载 PDF |
+| `github.com/*/*`（repo 首页） | `articles` | stars、primary language、description、license、最近 commit 日期 | 提取 README 前 500 字作为正文摘要；区分 repo 页 vs 文件页（文件页走默认流程） |
+| `mp.weixin.qq.com/*` | `wechat` | 公众号名称（`#js_name` 或 meta `og:site_name`） | 优先 browser 提取（见「站点选择器」） |
+| `youtube.com/watch*` | `videos` | 频道名、时长、观看数 | 优先 Supadata transcript；Schema.org 通常有 VideoObject |
+| `x.com/*/status/*` | `tweets` | likes、retweets、replies、是否 thread | thread（连续 tweet）自动展开全部推文 |
+| `news.ycombinator.com/item*` | `articles` | HN 得分、评论数、top 3 高赞评论 | **同时**抓取原文链接的内容（HN 页面本身只有讨论） |
+| `substack.com/p/*` 或 `*.substack.com/p/*` | `articles` | 作者、发布日期、likes | Substack JSON-LD 通常完整 |
+| `medium.com/*` 或 `*.medium.com/*` | `articles` | 作者、claps、reading time | 注意付费墙截断（见「站点选择器」） |
+
+### 路由匹配逻辑
+1. 按 URL 正则从上到下匹配，**首个命中**生效
+2. 命中后执行「额外提取」列的步骤，**叠加**到默认流程上（不替代）
+3. `自动 category` 列覆盖默认分类逻辑
+4. 未命中任何规则 → 走默认 URL 内容流程，category 默认 `articles`
+
+### 扩展方式
+后续遇到新的高频站点，直接在表格中追加一行。无需改代码逻辑。
+
+## 站点选择器
+
+当 `web_fetch` 提取结果残缺（正文 < 200 字）时，自动触发 `browser evaluate` + CSS 选择器精准提取。
+
+| 站点 | 常见问题 | CSS 选择器 | 降级策略 |
+|------|---------|-----------|---------|
+| `mp.weixin.qq.com` | web_fetch 经常拿不到正文或格式混乱 | `#js_content` | Chrome Relay 打开原始页面提取 |
+| `medium.com` | 付费墙截断，web_fetch 只拿到前几段 | `article section` | 仅保存可见部分，frontmatter 加 `incomplete: true`，标注"内容可能不完整（付费墙）" |
+| `substack.com` | 部分文章需登录/付费 | `.post-content, .body` | web_fetch 通常可用；失败时同 medium 处理 |
+| `36kr.com` | 反爬严重，web_fetch 可能返回空 | `.article-content` | browser 打开提取 |
+
+### 触发条件
+- `web_fetch` / `supadata` 返回的正文 **< 200 字**
+- 或者正文明显是错误页（包含"请在微信客户端打开"/"Enable JavaScript" 等）
+- 命中以上条件 → 自动尝试 browser 方案
+
+### 降级原则
+- 选择器提取失败 → **不阻塞收藏**
+- 保存已有内容 + frontmatter 加 `incomplete: true`
+- 收藏文件正文顶部加 `> ⚠️ 本文内容可能不完整，原始页面提取受限。`
 
 ## 插图保存规范
 
@@ -188,6 +267,10 @@ tags: [tag1, tag2, tag3]
 category: "articles|tweets|videos|wechat|ideas"
 language: "zh|en"
 summary: "一句话摘要"
+# Schema.org 增强（可选，自动提取）
+schema_type: "Article|VideoObject|Product|Recipe|SoftwareApplication|..."
+schema_data: { rating: 4.5, reviewCount: 120 }  # 原始结构化数据摘要，≤10 key-value
+incomplete: false  # 可选，true = 内容提取受限（付费墙/反爬），正文可能不完整
 # 视频专属（可选）
 duration: "时长"
 platform: "bilibili|youtube"
