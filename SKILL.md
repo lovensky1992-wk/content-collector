@@ -65,6 +65,14 @@ content = 原始 frontmatter（加 aliases） + "\n\n" + "#tag1 #tag2 ..." + "\n
 
 ## 收藏工作流
 
+### Step 0：去重检查（每次收藏必做）
+收藏任何内容前，先执行去重：
+1. 如果有 URL → `obsidian search query="<domain/path>" total`（CLI 可用时）或 `grep -rl "<url>" collections/`（CLI 不可用时）
+   - ⚠️ 搜索时**去掉 `https://` 前缀**，只用域名+路径部分（Obsidian 会把 `https:` 解析为操作符报错）
+   - 例：`obsidian search query="github.com/user/repo" total`
+2. 返回 > 0 → 已收藏，回复「📌 已存在：<标题>（之前已收藏过）」，终止流程
+3. 返回 0 → 继续下方流程
+
 ### Supadata API（优先方案）
 对于大部分 URL，优先使用 Supadata API 解析：
 - 脚本：`SUPADATA_API_KEY=<key> python3 scripts/supadata_fetch.py <command> <url>`
@@ -90,14 +98,16 @@ Supadata 不可用时的降级方案：
 6. **提取有价值的插图**（默认执行，见下方「插图保存规范」）
 7. 生成 `collections/articles/YYYY-MM-DD-slug.md`（含插图引用）
 8. **HTML 快照保存**（仅重要文章）：对 P0/P1 级别的文章，额外保存一份原始 HTML 到 `collections/articles/YYYY-MM-DD-slug.html`，防止源页面删除后内容丢失。普通收藏不保存快照（避免磁盘膨胀）
-9. **同步到 Obsidian** → `<YOUR_OBSIDIAN_VAULT>/收藏/文章/{标题}.md`（含插图复制）
+9. **同步到 Obsidian**（优先 CLI，降级直接写文件）→ `收藏/文章/{标题}.md`（含插图复制）
+10. **Daily Note 联动** → `obsidian daily:append content="- 📌 收藏了 [[{标题}]]（{source}）| {一句话摘要}"`
 
 ### 视频内容（YouTube/TikTok/X/Instagram/Facebook）
 1. **元数据**: `supadata_fetch.py metadata <url>`
 2. **转录**: `supadata_fetch.py transcript <url> --text --lang zh`
 3. **内容提取**：基于转录文本提取核心观点、金句、要点
 4. 生成 `collections/videos/YYYY-MM-DD-slug.md`
-5. **同步到 Obsidian** → `<YOUR_OBSIDIAN_VAULT>/收藏/视频/{标题}.md`
+5. **同步到 Obsidian**（优先 CLI，降级直接写文件）→ `收藏/视频/{标题}.md`
+6. **Daily Note 联动** → `obsidian daily:append`
 
 ### 纯文本/截图
 1. 截图用 `image` 工具提取文字
@@ -120,7 +130,8 @@ Supadata 不可用时的降级方案：
      - 全部失败 → 仅保存元数据+评论，在收藏文件中标注"转录未获取，待补充"，不阻塞收藏流程
 4. **内容提取**：基于转录文本提取核心观点、金句、要点
 5. 生成 `collections/videos/YYYY-MM-DD-slug.md`
-6. **同步到 Obsidian** → `<YOUR_OBSIDIAN_VAULT>/收藏/视频/{标题}.md`
+6. **同步到 Obsidian**（优先 CLI，降级直接写文件）→ `收藏/视频/{标题}.md`
+7. **Daily Note 联动** → `obsidian daily:append`
 
 ## Schema.org 提取规范
 
@@ -158,6 +169,7 @@ Supadata 不可用时的降级方案：
 
 | URL 模式 | 自动 category | 额外提取 | 特殊处理 |
 |----------|--------------|---------|---------|
+| 内网域名（见下方清单） | `articles` | 标题、作者（如有） | **必须走 Chrome Relay**，见下方「内网文章收藏流程」 |
 | `arxiv.org/abs/*` | `articles` | abstract、authors 列表、PDF 链接、subjects/categories | 标签自动加 `论文`；从 abs 页提取，不下载 PDF |
 | `github.com/*/*`（repo 首页） | `articles` | stars、primary language、description、license、最近 commit 日期 | 提取 README 前 500 字作为正文摘要；区分 repo 页 vs 文件页（文件页走默认流程） |
 | `mp.weixin.qq.com/*` | `wechat` | 公众号名称（`#js_name` 或 meta `og:site_name`） | 优先 browser 提取（见「站点选择器」） |
@@ -176,12 +188,51 @@ Supadata 不可用时的降级方案：
 ### 扩展方式
 后续遇到新的高频站点，直接在表格中追加一行。无需改代码逻辑。
 
+## 内网文章收藏流程
+
+### 内网域名清单
+```
+*.alibaba-inc.com    # 阿里内网通用（含 ata.alibaba-inc.com / aone / done 等）
+*.aliyun-inc.com     # 阿里云内网
+*.alibaba.net        # 阿里内部
+*.taobao.org         # 淘系内网
+*.antfin.com         # 蚂蚁内网（含 yuque.antfin.com）
+*.atatech.org        # ATA 技术博客（ata.atatech.org）
+alidocs.dingtalk.com # 钉钉文档（阿里内部文档）
+```
+
+### 识别方式
+1. clip 脚本自动检测：消息以 `[内网]` 开头
+2. 手动发送：用户发内网 URL 时，agent 按域名匹配识别
+
+### 收藏步骤
+1. **不调用 web_fetch / supadata**（内网必失败，浪费时间和 credit）
+2. **提示老板点 Chrome Relay**：
+   > 📌 检测到内网链接，我需要通过你的浏览器读取内容。
+   > 请确认当前 Tab 已打开这个页面，然后**点一下 Chrome Relay 按钮**（toolbar 上，badge 变 ON），我来提取。
+3. **等老板确认**（老板说"好了"/"点了"/"OK" 等）
+4. **通过 user 提取**：
+   ```
+   browser(action=snapshot, profile="user")
+   ```
+   获取页面正文内容
+5. **正常走收藏流程**：提取标题/作者/正文 → 生成收藏文件 → 更新索引 → 同步 Obsidian
+6. **提取完成后提醒老板**可以关掉 Relay（可选，不关也没事）
+
+### 降级处理
+- 老板不方便点 Relay → 仅保存 URL + 标题（从消息或老板口述获取），frontmatter 加 `incomplete: true`，正文加 `> ⚠️ 内网文章，正文待补充。下次在浏览器打开时可重新收藏。`
+- user 提取正文 < 200 字 → 同上降级，可能是页面需要额外操作（如展开全文）
+
+### 标签
+内网文章自动加标签 `内网`、`阿里`。
+
 ## 站点选择器
 
 当 `web_fetch` 提取结果残缺（正文 < 200 字）时，自动触发 `browser evaluate` + CSS 选择器精准提取。
 
 | 站点 | 常见问题 | CSS 选择器 | 降级策略 |
 |------|---------|-----------|---------|
+| 内网域名（见清单） | 无外部访问权限 | 按页面结构判断 | **必须 Chrome Relay**，见「内网文章收藏流程」 |
 | `mp.weixin.qq.com` | web_fetch 经常拿不到正文或格式混乱 | `#js_content` | Chrome Relay 打开原始页面提取 |
 | `medium.com` | 付费墙截断，web_fetch 只拿到前几段 | `article section` | 仅保存可见部分，frontmatter 加 `incomplete: true`，标注"内容可能不完整（付费墙）" |
 | `substack.com` | 部分文章需登录/付费 | `.post-content, .body` | web_fetch 通常可用；失败时同 medium 处理 |
@@ -363,7 +414,60 @@ mindmap
 - 不生成独立图片文件——Mermaid 文本直接嵌入 Markdown
 - 不画太复杂的图——收藏文件的图是"速览"，不是完整笔记
 
+## Obsidian CLI 集成
+
+### 概述
+使用 Obsidian CLI（`obsidian` 命令）直接操作 KaiVault，替代手动写文件。CLI 通过 IPC 连接运行中的 Obsidian App，写入后自动触发索引更新。
+
+### 可用性检测与降级
+每次收藏操作开始时，先检测 CLI 是否可用：
+```bash
+obsidian vault 2>/dev/null
+```
+- 返回 vault 信息 → CLI 可用，使用 CLI 写入
+- 返回错误或超时 → Obsidian 未运行，**降级到直接写文件**（原有方式，写入 `<YOUR_OBSIDIAN_VAULT>/收藏/` 目录）
+
+降级对用户无感，不需要提示。CLI 可用时优先用 CLI。
+
+### 收藏前去重
+在执行收藏流程之前，先用 CLI 搜索是否已收藏过：
+```bash
+obsidian search query="<domain/path>" total
+```
+- ⚠️ **去掉 `https://` 前缀**，只搜域名+路径（`https:` 会被 Obsidian 解析为操作符报错）
+- 同时去掉 query params（`?utm_*` 等）
+- 返回 > 0 → 已收藏，告知用户「📌 已存在：<标题>（之前已收藏过）」，不重复收藏
+- 返回 0 → 继续收藏流程
+
+CLI 不可用时降级到 `grep -rl "<url>" collections/`。
+
+### CLI 写入 Obsidian
+收藏文件写入 `collections/` 后，用 CLI 同步到 Obsidian（替代直接写文件）：
+
+```bash
+# 创建笔记
+obsidian create path="收藏/{中文目录}/{标题}.md" content="<完整内容>" overwrite
+
+# 设置 frontmatter 属性
+obsidian property:set path="收藏/{中文目录}/{标题}.md" name="aliases" value="[{title}]" type=list
+obsidian property:set path="收藏/{中文目录}/{标题}.md" name="tags" value="[tag1,tag2]" type=list
+obsidian property:set path="收藏/{中文目录}/{标题}.md" name="url" value="{url}" type=text
+obsidian property:set path="收藏/{中文目录}/{标题}.md" name="source" value="{source}" type=text
+obsidian property:set path="收藏/{中文目录}/{标题}.md" name="date_collected" value="{date}" type=date
+```
+
+**实际操作时**：优先用 `obsidian create` 一次性写入完整内容（含 frontmatter YAML 头），减少多次 CLI 调用。`property:set` 仅在需要**追加或修改**已有笔记属性时使用。
+
+### Daily Note 联动
+每次收藏成功后，追加一条记录到当天的 Daily Note：
+```bash
+obsidian daily:append content="- 📌 收藏了 [[{标题}]]（{source}）| {一句话摘要}"
+```
+CLI 不可用时跳过此步（不阻塞收藏流程）。
+
 ## Obsidian 同步规范
+
+**优先使用 Obsidian CLI**（见上方「Obsidian CLI 集成」）。CLI 不可用时降级到以下直接写文件方式。
 
 每次写入 `collections/` 后，**必须**同时写入 Obsidian 版本。步骤：
 
@@ -450,6 +554,17 @@ mindmap
 4. 如果没有匹配的选题，跳过此步（不创建空文件）
 
 **注意**：此步骤是补充性的，不替代已有的"关联项目"功能。交接文件面向下游写作 skill，关联项目面向收藏库内部检索。
+
+## 收藏结果通知
+
+**每次收藏操作完成后（无论成功、重复、还是失败），必须返回收藏结果摘要。**
+
+通知内容格式（作为最终回复直接输出）：
+- 成功：`📌 已收藏：<标题>\n核心：<一句话摘要>\n标签：<3-5个标签>`
+- 重复：`📌 已存在：<标题>（之前已收藏过）`
+- 失败：`❌ 收藏失败：<URL>\n原因：<失败原因>`
+
+**⚠️ 不要调用 `message` 工具发送通知。** 直接以纯文本返回收藏结果即可——Gateway 的 deliver 机制会自动将结果推送到用户最后活跃的渠道（webchat/钉钉等）。在 hook session 中调 `message(channel=openclaw-weixin)` 会因缺少 contextToken 而失败。
 
 ## 命令速查
 
