@@ -96,19 +96,22 @@ Supadata 不可用时的降级方案：
 4. **Schema.org 结构化数据提取**（见下方「Schema.org 提取规范」）：尝试提取页面 JSON-LD，按类型补充 frontmatter 字段。获取不到静默跳过
 5. **URL 路由增强**（见下方「URL 路由表」）：匹配到特定域名时，执行额外提取步骤
 6. **提取有价值的插图**（默认执行，见下方「插图保存规范」）
-7. 生成 `collections/articles/YYYY-MM-DD-slug.md`（含插图引用）
-8. **HTML 快照保存**（仅重要文章）：对 P0/P1 级别的文章，额外保存一份原始 HTML 到 `collections/articles/YYYY-MM-DD-slug.html`，防止源页面删除后内容丢失。普通收藏不保存快照（避免磁盘膨胀）
-9. **同步到 Obsidian**（优先 CLI，降级直接写文件）→ `收藏/文章/{标题}.md`（含插图复制）
-10. **Daily Note 联动** → `obsidian daily:append content="- 📌 收藏了 [[{标题}]]（{source}）| {一句话摘要}"`
+7. **主题关键词提取**：见下方「主题关键词提取规范」，提取 5-7 个精细概念切面，写入 frontmatter.themes
+8. 生成 `collections/articles/YYYY-MM-DD-slug.md`（含插图引用）
+9. **HTML 快照保存**（仅重要文章）：对 P0/P1 级别的文章，额外保存一份原始 HTML 到 `collections/articles/YYYY-MM-DD-slug.html`，防止源页面删除后内容丢失。普通收藏不保存快照（避免磁盘膨胀）
+10. **同步到 Obsidian**（优先 CLI，降级直接写文件）→ `收藏/文章/{标题}.md`（含插图复制）
+11. **Daily Note 联动** → `obsidian daily:append content="- 📌 收藏了 [[{标题}]]（{source}）| {一句话摘要}"`
 
 ### 视频内容（YouTube/TikTok/X/Instagram/Facebook）
 1. **元数据**: `supadata_fetch.py metadata <url>`
 2. **转录**: `supadata_fetch.py transcript <url> --text --lang zh`
    - **YouTube 降级**：supadata credit 用完或失败时，先 navigate 到视频页面再运行 `python3 ~/.openclaw/workspace/scripts/bb_browser_bridge.py youtube/transcript`（需要浏览器在视频页面上）
 3. **内容提取**：基于转录文本提取核心观点、金句、要点
-4. 生成 `collections/videos/YYYY-MM-DD-slug.md`
-5. **同步到 Obsidian**（优先 CLI，降级直接写文件）→ `收藏/视频/{标题}.md`
-6. **Daily Note 联动** → `obsidian daily:append`
+4. **精彩片段提取**（≥10分钟视频）：见下方「精彩片段提取规范」
+5. **主题关键词提取**：见下方「主题关键词提取规范」
+6. 生成 `collections/videos/YYYY-MM-DD-slug.md`
+7. **同步到 Obsidian**（优先 CLI，降级直接写文件）→ `收藏/视频/{标题}.md`
+8. **Daily Note 联动** → `obsidian daily:append`
 
 ### 纯文本/截图
 1. 截图用 `image` 工具提取文字
@@ -121,20 +124,175 @@ Supadata 不可用时的降级方案：
    - 无登录（API）：3条热门
    - 已登录（浏览器 shadow DOM）：20+条，见 `references/bilibili-comments.md`
    - **降级**：`python3 ~/.openclaw/workspace/scripts/bb_browser_bridge.py bilibili/comments <bvid>`
-3. **视频转录**：`bash scripts/bilibili_transcribe.sh <bvid_or_url> [model]`
-   - 依赖：yt-dlp、faster-whisper（uv）、opencc
+3. **视频转录**：`bash scripts/video_transcribe.sh <bvid_or_url> [--model base]`
+   - **原生字幕优先**：自动检测 B站 CC 字幕（ai-zh > zh-CN > zh-Hans），有则直接下载转纯文本，跳过 whisper（秒级完成 vs 10+ 分钟）
+   - **无原生字幕**：自动降级到 whisper 转录（yt-dlp 下载音频 + faster-whisper）
+   - 依赖：yt-dlp、ffmpeg、faster-whisper（uv）、opencc
    - 需浏览器已登录B站（yt-dlp 读取 cookie）
    - 模型：tiny/base(默认)/small/medium，base 约10-15分钟转录46分钟视频
-   - 输出：`/tmp/bilibili_audio/<BVID>_transcript.json` + `.txt`
+   - 输出：`/tmp/video_audio/{platform}_{id}_subtitle.txt`（原生）或 `_transcript.json` + `.txt`（whisper）
+   - 输出 JSON 含 `subtitle_source: "native_cc"` 或 `"whisper"`，收藏时写入 frontmatter
+   - **两步模式**（长视频推荐，可分步重试）：
+     - `bash scripts/video_transcribe.sh --step download <url>` → 只下载音频/字幕
+     - `bash scripts/video_transcribe.sh --step transcribe <audio_file>` → 只转录
    - 注意：ASR 有识别错误，专有名词需人工校验
    - **降级方案**（转录失败时）：
      - yt-dlp cookie 过期 → 提示用户在 openclaw browser 重新登录 B站
      - faster-whisper 不可用 → 尝试 `whisper` CLI（`pip3 install openai-whisper`）
      - 全部失败 → 仅保存元数据+评论，在收藏文件中标注"转录未获取，待补充"，不阻塞收藏流程
+   - **句子合并**（Whisper 转录后自动执行）：`video_transcribe.sh` 内置调用 `sentence_merger.py`，将碎片段合并为完整句子，提升可读性和后续 AI 处理质量。合并结果在 `_merged.json` / `_merged.txt`
 4. **内容提取**：基于转录文本提取核心观点、金句、要点
-5. 生成 `collections/videos/YYYY-MM-DD-slug.md`
-6. **同步到 Obsidian**（优先 CLI，降级直接写文件）→ `收藏/视频/{标题}.md`
-7. **Daily Note 联动** → `obsidian daily:append`
+5. **精彩片段提取**（≥10分钟视频）：见下方「精彩片段提取规范」，提取 3-5 个最值得看的时间段，写入 frontmatter.highlights 和正文
+6. **主题关键词提取**（所有内容）：见下方「主题关键词提取规范」，提取 5-7 个精细概念切面，写入 frontmatter.themes
+7. 生成 `collections/videos/YYYY-MM-DD-slug.md`
+8. **同步到 Obsidian**（优先 CLI，降级直接写文件）→ `收藏/视频/{标题}.md`
+9. **Daily Note 联动** → `obsidian daily:append`
+
+### 小红书/抖音视频（本地转录）
+1. **转录**：`bash scripts/video_transcribe.sh <url> [--model base]`
+   - 自动检测平台：`xiaohongshu.com/explore/*`、`xhslink.com/*`、`douyin.com/video/*`、`v.douyin.com/*`
+   - 下载策略：优先 `--cookies-from-browser chrome`，失败后尝试无 cookie
+   - whisper 转录（小红书/抖音无原生字幕）
+   - **两步模式**同 B站
+2. **内容提取**：基于转录文本提取核心观点、金句、要点
+3. **主题关键词提取**：见下方「主题关键词提取规范」
+4. 生成 `collections/videos/YYYY-MM-DD-slug.md`（frontmatter 含 `subtitle_source: whisper`）
+5. **同步到 Obsidian** → `收藏/视频/{标题}.md`
+6. **Daily Note 联动** → `obsidian daily:append`
+7. **降级**：下载失败 → 仅保存 URL + 手动描述，frontmatter 加 `incomplete: true`
+
+## 精彩片段提取规范
+
+**目标**：从长视频转录中自动筛选 3-5 个最值得看的精华时间段，帮助用户快速定位价值内容。
+
+### 触发条件
+- 视频时长 ≥ 10 分钟
+- 有完整转录文本（whisper 或 native_cc）
+- < 10 分钟的短视频跳过此步骤
+
+### 提取方式
+
+使用以下 prompt 提取精彩片段（遵循 `references/prompt-engineering-template.md` 的 XML 结构化范式）：
+
+```xml
+<task>
+<role>You are an expert content curator selecting the most valuable moments from a video transcript.</role>
+<languageRequirement>IMPORTANT: You MUST generate all content in Chinese.</languageRequirement>
+<context>
+Title: {video_title}
+Speaker: {video_author}
+Duration: {duration}
+</context>
+<goal>From this {duration} video, select the 3-5 most compelling moments worth watching.</goal>
+<instructions>
+  <item>Each highlight must be a contiguous segment of 45-90 seconds.</item>
+  <item>Title must be specific and ≤15 characters. No generic titles like "重要观点".</item>
+  <item>Quote must be an exact verbatim match from the transcript.</item>
+  <item>Timestamps in [MM:SS-MM:SS] format.</item>
+  <item>Insight explains in one sentence why this moment matters.</item>
+  <item>Distribute highlights across the full video timeline — don't cluster in the opening.</item>
+  <item>Focus on: contrarian insights, vivid stories, data-backed arguments, practical frameworks, memorable quotes.</item>
+</instructions>
+<qualityControl>
+  <item>Are highlights distributed across the video (beginning, middle, end)?</item>
+  <item>Does each highlight stand alone without needing context?</item>
+  <item>Is the quote a verbatim match from the transcript?</item>
+</qualityControl>
+<outputFormat>Return strict JSON: [{"title":"string","start":"MM:SS","end":"MM:SS","quote":"exact transcript text","insight":"one sentence why this matters"}]. No markdown.</outputFormat>
+<transcript><![CDATA[
+{transcript_with_timestamps}
+]]></transcript>
+</task>
+```
+
+### 写入格式
+
+**frontmatter**：
+```yaml
+highlights:
+  - title: "片段标题"
+    start: "12:30"
+    end: "13:45"
+    quote: "原文引用"
+    insight: "为什么值得看"
+```
+
+**正文**（在「核心观点」之后、「要点摘录」之前）：
+```markdown
+## 精彩片段
+
+> AI 从 {duration} 视频中筛选的 {N} 个最值得看的片段
+
+**1. [{start}-{end}] {title}**
+> {quote}
+
+{insight}
+```
+
+### 降级
+- 转录文本过短（< 500 字）→ 跳过
+- AI 提取失败 → 跳过，不阻塞收藏流程
+- 产出不满 3 个 → 有几个写几个
+
+## 主题关键词提取规范
+
+**目标**：为每篇收藏内容提取 5-7 个精细概念切面，辅助选题和二创时快速判断"这篇可以从哪些角度写文章"。
+
+### 与 tags 的区别
+
+| | tags | themes |
+|---|---|---|
+| 粒度 | 大类（AI、产品） | 具体概念（Prompt 工程范式、用户分层策略） |
+| 用途 | 检索/分类 | 选题/二创灵感 |
+| 数量 | 3-5 | 5-7 |
+
+### 触发条件
+- **所有内容类型**（文章、视频、推文、笔记），只要有足够文本（≥ 200 字）
+- 可以在生成 summary + tags 的同一步 AI 调用中一起提取，不需要额外调用
+
+### 提取方式
+
+使用以下 prompt（或合并到内容提取步骤中）：
+
+```xml
+<task>
+<role>You are an expert content analyst and semantic keyword extraction specialist.</role>
+<languageRequirement>IMPORTANT: You MUST generate all keywords in Chinese. Technical terms keep English in parentheses.</languageRequirement>
+<context>
+Title: {title}
+Source: {source}
+Author: {author}
+</context>
+<goal>Extract 5-7 core conceptual themes that precisely capture the main topics discussed.</goal>
+<instructions>
+  <item>Each keyword/phrase must be 2-6 Chinese characters (or 1-3 English words for technical terms).</item>
+  <item>Each keyword must capture a meaningfully different angle, stakeholder, problem, or method.</item>
+  <item>Specificity over Generality: "用户分层策略" > "用户运营".</item>
+  <item>Cover different facets: challenges, solutions, frameworks, stakeholders, outcomes.</item>
+  <item>Avoid synonyms or adjective swaps of earlier keywords.</item>
+</instructions>
+<qualityControl>
+  <item>Would each theme alone spark a specific article idea?</item>
+  <item>Are any two themes essentially the same concept reworded?</item>
+</qualityControl>
+<outputFormat>Return a JSON array of strings: ["theme1","theme2",...]. No markdown.</outputFormat>
+<content><![CDATA[
+{content_text_first_3000_chars}
+]]></content>
+</task>
+```
+
+### 写入格式
+
+**frontmatter**：
+```yaml
+themes: ["Prompt工程范式", "AI Agent架构", "用户意图识别", "工具调用策略", "上下文窗口优化"]
+```
+
+### 降级
+- 内容太短（< 200 字）→ 跳过
+- AI 提取失败 → 跳过，用 tags 替代
+- 输出不是数组 → 跳过
 
 ## Schema.org 提取规范
 
@@ -177,6 +335,8 @@ Supadata 不可用时的降级方案：
 | `github.com/*/*`（repo 首页） | `articles` | stars、primary language、description、license、最近 commit 日期 | 提取 README 前 500 字作为正文摘要；区分 repo 页 vs 文件页（文件页走默认流程） |
 | `mp.weixin.qq.com/*` | `wechat` | 公众号名称（`#js_name` 或 meta `og:site_name`） | 优先 browser 提取（见「站点选择器」） |
 | `youtube.com/watch*` | `videos` | 频道名、时长、观看数 | 优先 Supadata transcript；Schema.org 通常有 VideoObject |
+| `xiaohongshu.com/explore/*` 或 `xhslink.com/*`（视频类） | `videos` | 作者、点赞数 | `video_transcribe.sh` 本地转录（whisper）；非视频笔记走默认流程 |
+| `douyin.com/video/*` 或 `v.douyin.com/*` | `videos` | 作者、点赞数 | `video_transcribe.sh` 本地转录（whisper） |
 | `x.com/*/status/*` | `tweets` | likes、retweets、replies、是否 thread | thread（连续 tweet）自动展开全部推文 |
 | `news.ycombinator.com/item*` | `articles` | HN 得分、评论数、top 3 高赞评论 | **同时**抓取原文链接的内容（HN 页面本身只有讨论） |
 | `substack.com/p/*` 或 `*.substack.com/p/*` | `articles` | 作者、发布日期、likes | Substack JSON-LD 通常完整 |
@@ -325,11 +485,21 @@ summary: "一句话摘要"
 schema_type: "Article|VideoObject|Product|Recipe|SoftwareApplication|..."
 schema_data: { rating: 4.5, reviewCount: 120 }  # 原始结构化数据摘要，≤10 key-value
 incomplete: false  # 可选，true = 内容提取受限（付费墙/反爬），正文可能不完整
+# 主题关键词（可选，AI 自动提取）
+themes: ["主题1", "主题2", "主题3"]  # 5-7 个精细概念切面，辅助选题/二创
 # 视频专属（可选）
 duration: "时长"
 platform: "bilibili|youtube"
 bvid: "BV号"
 stats: { views: 0, likes: 0, comments: 0 }
+subtitle_source: "native_cc|whisper"  # 字幕来源
+# 精彩片段（视频专属，AI 自动提取）
+highlights:
+  - title: "片段标题"
+    start: "MM:SS"
+    end: "MM:SS"
+    quote: "原文引用"
+    insight: "为什么值得看"
 ---
 ```
 
@@ -337,6 +507,7 @@ stats: { views: 0, likes: 0, comments: 0 }
 
 - **内容概览**（条件触发，见下方规则）— Mermaid 图，一图看懂全文
 - **核心观点** — 3-7个要点
+- **精彩片段**（视频类，≥10分钟视频）— AI 筛选的 3-5 个最值得看的时间段（见下方「精彩片段提取规范」）
 - **要点摘录** — 原文金句（blockquote）
 - **热门评论精选**（视频类）— 含点赞数
 - **评论区观点摘要**（视频类）— 总结争议点
@@ -581,3 +752,16 @@ CLI 不可用时跳过此步（不阻塞收藏流程）。
 | "给这篇加个笔记" | 更新"我的笔记"部分 |
 | "删除这条收藏" | 移除并更新索引 + 删除 Obsidian 对应文件 |
 | "重新同步到 Obsidian" | 全量重新同步：`python3 scripts/sync_to_obsidian.py`（skill 目录下） |
+
+---
+
+## 下一步建议（条件触发）
+
+收藏完成后，根据内容特征判断是否推荐下一步。不是每次都推荐，只在有明确价值时才说。
+
+| 触发条件 | 推荐 |
+|---------|------|
+| 收藏内容与老板公众号选题方向高度相关 | 「这篇素材适合二创公众号文章，需要的话用 wemp-ops 写。」 |
+| 收藏内容适合小红书短图文（观点鲜明、有反差、可视化强） | 「这个素材适合做小红书笔记，需要的话用 xiaohongshu-ops 改写。」 |
+| 收藏了某个 X 博主的多条内容（≥3 条） | 「这个博主收藏了好几条了，要不要用 x-profile-deep-dive 做个深度画像？」 |
+| 收藏内容涉及技术方案/架构决策 | 「这个方案可以存到 memory 做长期参考，要记一下吗？」 |

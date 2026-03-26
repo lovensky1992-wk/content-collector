@@ -1,4 +1,10 @@
 #!/bin/bash
+# DEPRECATED: Please use video_transcribe.sh instead
+# This script is kept for backward compatibility only
+#
+# New script supports multiple platforms and native subtitle detection:
+#   bash scripts/video_transcribe.sh <url_or_file> [--model base]
+#
 # Download audio from Bilibili video and transcribe with faster-whisper
 # Usage: bash bilibili_transcribe.sh <bvid_or_url> [model_size]
 # model_size: tiny, base (default), small, medium, large-v3
