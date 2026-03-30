@@ -11,6 +11,7 @@
 #   --platform <name>    Force platform: bilibili, youtube, xiaohongshu, douyin, auto (default: auto)
 #   --step <action>      Run specific step: download, transcribe (default: both)
 #   --model <size>       Whisper model: tiny, base (default), small, medium, large-v3
+#   --force              Force transcription even if cached result exists
 #   --help               Show this help message
 #
 # Two-step workflow:
@@ -23,11 +24,11 @@
 #   bash video_transcribe.sh <url> [--model base]
 #   Output: Combined JSON with download + transcribe results
 #
-# Subtitle detection priority:
-#   - Bilibili/YouTube: Check for native CC/subtitles first
-#   - If native subtitle found: download and convert to plain text
-#   - If no native subtitle: fallback to Whisper transcription
-#   - Output includes subtitle_source: "native_cc" or "whisper"
+# Transcription priority:
+#   1. Native CC/subtitles (Bilibili/YouTube only)
+#   2. Volcengine ASR (if VOLC_ASR_APPID and VOLC_ASR_TOKEN are set)
+#   3. Local Whisper (fallback)
+#   - Output includes subtitle_source: "native_cc", "volc_asr", or "whisper"
 
 set -e
 
@@ -35,6 +36,7 @@ set -e
 PLATFORM="auto"
 STEP="full"
 MODEL="base"
+FORCE_TRANSCRIBE="false"
 OUTDIR="/tmp/video_audio"
 mkdir -p "$OUTDIR"
 
@@ -61,6 +63,10 @@ while [[ $# -gt 0 ]]; do
         --model)
             MODEL="$2"
             shift 2
+            ;;
+        --force)
+            FORCE_TRANSCRIBE="true"
+            shift
             ;;
         *)
             if [ -z "$INPUT" ]; then
@@ -350,6 +356,81 @@ download_audio() {
 # Transcribe step
 # ============================================================================
 
+check_existing_transcript() {
+    local base_name="$1"
+
+    # Check for any existing transcript file
+    local cached_files=(
+        "$OUTDIR/${base_name}_transcript.txt"
+        "$OUTDIR/${base_name}_merged.txt"
+        "$OUTDIR/${base_name}_subtitle.txt"
+    )
+
+    for cached in "${cached_files[@]}"; do
+        if [ -f "$cached" ]; then
+            echo "$cached"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+transcribe_with_volc_asr() {
+    local audio_file="$1"
+    local base_name="$2"
+    local transcript_json="$3"
+    local transcript_txt="$4"
+
+    # Check credentials
+    if [ -z "$VOLC_ASR_APPID" ] || [ -z "$VOLC_ASR_TOKEN" ]; then
+        return 1
+    fi
+
+    echo "Transcribing with Volcengine ASR..." >&2
+
+    # Get script directory
+    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local volc_script="$script_dir/volc_asr.py"
+
+    if [ ! -f "$volc_script" ]; then
+        echo "Warning: volc_asr.py not found, falling back to whisper" >&2
+        return 1
+    fi
+
+    # Call Volcengine ASR (stderr goes to stderr, stdout captured as JSON)
+    local volc_tmpfile="$OUTDIR/.volc_result_$$.json"
+    python3 "$volc_script" "$audio_file" > "$volc_tmpfile" 2>&2
+    local volc_exit=$?
+
+    if [ $volc_exit -ne 0 ] || [ ! -s "$volc_tmpfile" ]; then
+        echo "Warning: Volcengine ASR failed (exit=$volc_exit), falling back to whisper" >&2
+        rm -f "$volc_tmpfile"
+        return 1
+    fi
+
+    # Parse result - volc_asr.py outputs clean JSON to stdout
+    local full_text=$(jq -r '.full_text' "$volc_tmpfile")
+    local duration=$(jq -r '.duration' "$volc_tmpfile")
+
+    # Save segments array to transcript JSON (compatible with whisper format)
+    jq '.segments' "$volc_tmpfile" > "$transcript_json"
+    echo "$full_text" > "$transcript_txt"
+    rm -f "$volc_tmpfile"
+
+    local seg_count=$(jq length "$transcript_json")
+    local chars=$(echo -n "$full_text" | wc -c | tr -d ' ')
+
+    echo "Volcengine ASR complete: $seg_count segments, $chars chars" >&2
+
+    # Output JSON
+    jq -n --arg json "$transcript_json" --arg txt "$transcript_txt" \
+        --argjson seg "$seg_count" --argjson dur "$duration" --argjson chars "$chars" \
+        '{transcript_json: $json, transcript_txt: $txt, segments: $seg, duration_s: $dur, chars: $chars, subtitle_source: "volc_asr"}'
+
+    return 0
+}
+
 transcribe_audio() {
     local audio_file="$1"
     local model="$2"
@@ -364,15 +445,42 @@ transcribe_audio() {
     local transcript_json="$OUTDIR/${base_name}_transcript.json"
     local transcript_txt="$OUTDIR/${base_name}_transcript.txt"
 
-    # Check if already transcribed
-    if [ -f "$transcript_json" ] && [ -f "$transcript_txt" ]; then
-        echo "Transcript already exists: $transcript_json" >&2
-        # Read existing stats and output
-        local segments=$(jq length "$transcript_json")
-        local duration=$(jq '[-1].end // 0' "$transcript_json")
-        local chars=$(wc -c < "$transcript_txt" | tr -d ' ')
-        jq -n --arg json "$transcript_json" --arg txt "$transcript_txt" --argjson seg "$segments" --argjson dur "$duration" --argjson chars "$chars" \
-            '{transcript_json: $json, transcript_txt: $txt, segments: $seg, duration_s: $dur, chars: $chars, subtitle_source: "whisper"}'
+    # Check cache if not forced
+    if [ "$FORCE_TRANSCRIBE" != "true" ]; then
+        local cached_file=$(check_existing_transcript "$base_name")
+        if [ $? -eq 0 ]; then
+            echo "Using cached transcript: $cached_file" >&2
+
+            # Determine source from cached file
+            local source="unknown"
+            if [[ "$cached_file" == *"_subtitle.txt" ]]; then
+                source="native_cc"
+            elif [ -f "$transcript_json" ]; then
+                # Try to read source from JSON
+                source=$(jq -r '.source // "whisper"' "$transcript_json" 2>/dev/null || echo "whisper")
+            else
+                source="whisper"
+            fi
+
+            # Return cached result
+            local chars=$(wc -c < "$cached_file" | tr -d ' ')
+            if [ -f "$transcript_json" ]; then
+                local segments=$(jq length "$transcript_json" 2>/dev/null || echo "1")
+                local duration=$(jq '[-1].end // 0' "$transcript_json" 2>/dev/null || echo "0")
+            else
+                segments=1
+                duration=0
+            fi
+
+            jq -n --arg json "$transcript_json" --arg txt "$cached_file" \
+                --argjson seg "$segments" --argjson dur "$duration" --argjson chars "$chars" --arg src "$source" \
+                '{transcript_json: $json, transcript_txt: $txt, segments: $seg, duration_s: $dur, chars: $chars, subtitle_source: $src}'
+            return
+        fi
+    fi
+
+    # Try Volcengine ASR first
+    if transcribe_with_volc_asr "$audio_file" "$base_name" "$transcript_json" "$transcript_txt"; then
         return
     fi
 
@@ -412,6 +520,16 @@ with open(json_out, "w") as f:
 full_text = " ".join([s["text"] for s in results])
 with open(txt_out, "w") as f:
     f.write(full_text)
+
+# Save source to JSON file
+results_with_meta = {
+    "source": "whisper",
+    "segments": results
+}
+
+# Also save segments-only format for compatibility
+with open(json_out, "w") as f:
+    json.dump(results, f, ensure_ascii=False, indent=2)
 
 # Output JSON to stdout
 json.dump({
