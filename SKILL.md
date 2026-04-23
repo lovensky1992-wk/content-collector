@@ -66,15 +66,23 @@ description: >
 4. `obsidian daily:append content="- 📌 收藏了 [[{标题}]]({source})| {一句话摘要}"`
 5. 更新 `index.md` + `tags.md`
 
+### Step 3.5: 微信图片缓存（wechat 类必做）
+如果 URL 是微信公众号（`mp.weixin.qq.com`），写完收藏文件后运行：
+`bash scripts/cache-wechat-images.sh <刚写入的收藏文件>`
+下载微信 CDN 图片到本地 `collections/images/<slug>/`，防止图片过期 404。
+
 ### Step 4: 关联匹配
-1. 匹配 `memory/topics/projects.md` 中的活跃项目 → 写入 frontmatter `related_projects`
-2. 匹配 `collections/topics/topic-pool.md` → 追加到 `temp/handoffs/collector-to-writing.md`
+运行 `bash scripts/post-collect.sh <刚写入的收藏文件>`
+脚本自动匹配活跃项目和相关收藏，更新 frontmatter 的 related_projects。
+如有相关收藏，在回复中附带提及。
+仍需手动匹配 `collections/topics/topic-pool.md` → 追加到 `temp/handoffs/collector-to-writing.md`
 
 ## 写文件前自检
 
 每次写 collections/ 文件前，确认以下步骤已完成。缺项标注 `incomplete: true`，不允许静默跳过。
 
 - 去重 ✓ → 内容提取 ✓ → 插图(文章类,必做) ✓ → 主题关键词 ✓ → 写文件 ✓ → Obsidian同步 ✓ → Daily Note ✓
+- 写 tags 前运行 `bash scripts/normalize-tags.sh <tag1> <tag2> ...` 检查是否有已有近似 tag，优先复用已有 tag 名称
 
 ## 存储 Schema
 
@@ -137,6 +145,21 @@ related_projects: []
 | `scripts/bilibili_extract.py <url>` | B站元数据 |
 | `scripts/video_transcribe.sh <url>` | 视频转录（自动检测平台） |
 | `scripts/sync_to_obsidian.py` | 批量同步到 Obsidian |
+| `scripts/cache-wechat-images.sh <file>` | 微信 CDN 图片本地缓存 |
+| `scripts/normalize-tags.sh <tag1> <tag2> ...` | 标签归一化去重 |
+| `scripts/post-collect.sh <file>` | 收藏后自动关联分析 |
+
+## 🔴 Final: 机械验证（不可跳过）
+
+通知用户前运行：
+```bash
+bash scripts/skill-verify.sh content-collector <collections-file-path>
+# 例: bash scripts/skill-verify.sh content-collector collections/wechat/2026-04-23-xxx.md
+```
+- ✅ ALL PASSED → 回复用户收藏结果
+- ❌ FAILED → 按输出补齐缺失项（Obsidian 同步/插图/index.md 等），重新验证直到通过
+
+绝不在验证未通过时回复用户"已完成"。
 
 ## 收藏结果通知
 
