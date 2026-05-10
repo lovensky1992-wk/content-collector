@@ -479,7 +479,39 @@ transcribe_audio() {
         fi
     fi
 
-    # Try Volcengine ASR first
+    # Try mlx-qwen3-asr first (much better accuracy than whisper base)
+    local MLX_ASR="$HOME/.openclaw/venvs/mlx-asr/bin/mlx-qwen3-asr"
+    if [ -x "$MLX_ASR" ]; then
+        echo "Transcribing with Qwen3-ASR (mlx)..." >&2
+        local mlx_text
+        mlx_text=$($MLX_ASR "$audio_file" --output-format txt --no-progress 2>/dev/null)
+        local mlx_exit=$?
+
+        if [ $mlx_exit -eq 0 ] && [ -n "$mlx_text" ] && [ ${#mlx_text} -gt 50 ]; then
+            echo "$mlx_text" > "$transcript_txt"
+            # Generate a compatible JSON segments file
+            python3 -c "
+import json, sys
+text = sys.stdin.read().strip()
+segments = [{'start': 0.0, 'end': 0.0, 'text': line.strip()} for line in text.split('\\n') if line.strip()]
+with open('$transcript_json', 'w') as f:
+    json.dump(segments, f, ensure_ascii=False, indent=2)
+json.dump({
+    'transcript_json': '$transcript_json',
+    'transcript_txt': '$transcript_txt',
+    'segments': len(segments),
+    'duration_s': 0,
+    'chars': len(text),
+    'subtitle_source': 'qwen3-asr'
+}, sys.stdout)
+" <<< "$mlx_text"
+            return
+        else
+            echo "Warning: Qwen3-ASR failed (exit=$mlx_exit), falling back to whisper" >&2
+        fi
+    fi
+
+    # Try Volcengine ASR
     if transcribe_with_volc_asr "$audio_file" "$base_name" "$transcript_json" "$transcript_txt"; then
         return
     fi
