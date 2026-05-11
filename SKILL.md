@@ -77,6 +77,16 @@ description: >
 如有相关收藏，在回复中附带提及。
 仍需手动匹配 `collections/topics/topic-pool.md` → 追加到 `temp/handoffs/collector-to-writing.md`
 
+### Step 4.5: 知识库 Ingest（自动触发）
+运行 `bash scripts/wiki-ingest-check.sh <刚写入的收藏文件>`
+- 返回 0（匹配 wiki 主题）→ 通知用户“已加入知识库编译队列”，然后 spawn 后台子 Agent 执行 ingest：
+  - 读取文章内容
+  - 写入 `~/KaiVault/知识库/summaries/<slug>.md`
+  - 更新相关 concept 页（追加新观点/数据，不重写）
+  - 更新 `知识库/index.md` summaries 列表
+- 返回 1（不匹配）→ 跳过，不做任何操作
+- 🔴 ingest 子 Agent 用 `mode="run" cleanup="delete"` 后台执行，不阻塞收藏流程
+
 ## 写文件前自检
 
 每次写 collections/ 文件前，确认以下步骤已完成。缺项标注 `incomplete: true`，不允许静默跳过。
